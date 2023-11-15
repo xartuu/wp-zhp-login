@@ -64,8 +64,8 @@ class ZHPLogin
     public function __construct()
     {
         // If plugin is not configured, it will notify the administrators.
-        if (!$this->isConfigured()) {
-            add_action('all_admin_notices', array($this, 'notConfiguredMessage'));
+        if (!$this->is_configured()) {
+            add_action('all_admin_notices', array($this, 'not_configured_message'));
             return;
         }
         $this->callback_url  = wp_login_url();
@@ -100,7 +100,7 @@ class ZHPLogin
     }
 
     // Gets the (only) instance of the plugin. Initializes an instance if it hasn't yet.
-    public static function getInstance()
+    public static function get_instance()
     {
         if (!self::$instance) {
             self::$instance = new self();
@@ -109,13 +109,13 @@ class ZHPLogin
     }
 
     // Checks if plugin is configured
-    public function isConfigured()
+    public function is_configured()
     {
         return defined('ZHP_LOGIN_CLIENT_ID') && defined('ZHP_LOGIN_TENANT_ID') && defined('ZHP_LOGIN_CLIENT_SECRET');
     }
 
     // Displays a message to the administrators that the plugin is not configured
-    public function notConfiguredMessage()
+    public function not_configured_message()
     {
         print(sprintf(
             '<div id="message" class="error"><p>%s</p></div>',
@@ -125,7 +125,7 @@ class ZHPLogin
     }
 
     // Returns the URL that redirects user to ZHP Login in Azure AD.
-    public function zhploginUrl($redirect = '')
+    public function zhplogin_url($redirect = '')
     {
         $args = array(
             'action' => 'zhplogin',
@@ -148,7 +148,7 @@ class ZHPLogin
     }
 
     // zhp_login_action
-    public function zhploginAction()
+    public function zhplogin_action()
     {
         // Save the redirect_to parameter
         if (!empty($_REQUEST[ 'redirect_to' ])) {
@@ -183,9 +183,9 @@ class ZHPLogin
     }
 
     // Adds login button to the login form
-    public function addLoginButton()
+    public function add_login_button()
     {
-        $zhplogin_url = $this->zhploginUrl(@$_REQUEST[ 'redirect_to' ]);
+        $zhplogin_url = $this->zhplogin_url(@$_REQUEST[ 'redirect_to' ]);
         print(sprintf(
             '
 <p style="text-align: center; padding-top: 15px; padding-bottom: 30px;">
@@ -202,7 +202,7 @@ class ZHPLogin
     }
 
     // If set, the login form will be skipped and the user will be redirected to Azure AD login
-    public function skipLoginForm()
+    public function skip_login_form()
     {
         if (ZHP_LOGIN_SKIP_LOGIN_FORM !== true) {
             return;
@@ -212,11 +212,11 @@ class ZHPLogin
             return;
         }
 
-        return wp_redirect($this->zhploginUrl(@$_REQUEST[ 'redirect_to' ]));
+        return wp_redirect($this->zhplogin_url(@$_REQUEST[ 'redirect_to' ]));
     }
 
     // Redirects after login to original location
-    public function redirectAfterLogin($redirect_to, $request, $user)
+    public function redirect_after_login($redirect_to, $request, $user)
     {
         if (is_a($user, 'WP_User') && !empty($_COOKIE[ 'wp-redirect-to' ])) {
             $redirect_to = $_COOKIE[ 'wp-redirect-to' ];
@@ -392,4 +392,4 @@ class ZHPLogin
 }
 
 // Initializes the plugin
-ZHPLogin::getInstance();
+ZHPLogin::get_instance();

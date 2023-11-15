@@ -45,6 +45,9 @@ defined('ZHP_LOGIN_SKIP_LOGIN_FORM') || define('ZHP_LOGIN_SKIP_LOGIN_FORM', fals
 defined('ZHP_LOGIN_CREATE_NEW_USER') || define('ZHP_LOGIN_CREATE_NEW_USER', false);
 defined('ZHP_LOGIN_NEW_USER_ROLE') || define('ZHP_LOGIN_NEW_USER_ROLE', 'subscriber');
 
+// If plugin is used as a mu-plugin, COOKIEHASH is not defined
+defined('COOKIEHASH') || wp_cookie_constants();
+
 class ZHPLogin
 {
 

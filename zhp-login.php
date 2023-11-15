@@ -312,7 +312,7 @@ class ZHPLogin
 
         $user_response = wp_remote_get('https://graph.microsoft.com/v1.0/me', [
             'headers' => [
-                'Authorization' => '$token_data->token_type $token_data->access_token',
+                'Authorization' => $token_data->token_type . " " . $token_data->access_token,
              ],
          ]);
 

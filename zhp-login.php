@@ -326,10 +326,10 @@ class ZHPLogin
         // Failed to obtain user informations
         if (!empty($user_data->error)) {
             return new WP_Error(
-                $user_data->error,
+                $user_data->error->code,
                 sprintf(
                     __('Błąd przy pobieraniu informacji o użytkowniku: %s', 'zhp-login'),
-                    $user_data->error_description
+                    $user_data->error->message
                 )
             );
         }

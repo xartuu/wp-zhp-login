@@ -65,7 +65,7 @@ class ZHPLogin
     {
         // If plugin is not configured, it will notify the administrators.
         if (!$this->isConfigured()) {
-            add_action('all_admin_notices', array($this, 'not_configured_message'));
+            add_action('all_admin_notices', array($this, 'notConfiguredMessage'));
             return;
         }
         $this->callback_url  = wp_login_url();

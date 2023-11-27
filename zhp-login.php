@@ -12,7 +12,7 @@
  * Plugin Name:       ZHP Login
  * Plugin URI:        https://github.com/xartuu/wp-zhp-login
  * Description:       Enables the Azure AD Single Sign On used by ZHP.
- * Version:           0.1.0
+ * Version:           0.1.4
  * Author:            Artur Kociszewski
  * Author URI:        https://arturkociszewski.pl/
  * License:           GPL v3 or later
@@ -30,20 +30,35 @@ if (class_exists(Config::class) && function_exists('Env\env')) {
     env('ZHP_LOGIN_CLIENT_ID') === null || Config::define('ZHP_LOGIN_CLIENT_ID', env('ZHP_LOGIN_CLIENT_ID'));
     env('ZHP_LOGIN_TENANT_ID') === null || Config::define('ZHP_LOGIN_TENANT_ID', env('ZHP_LOGIN_TENANT_ID'));
     env('ZHP_LOGIN_CLIENT_SECRET') === null || Config::define('ZHP_LOGIN_CLIENT_SECRET', env('ZHP_LOGIN_CLIENT_SECRET'));
-    env('ZHP_LOGIN_POST_RESPONSE') === null || Config::define('ZHP_LOGIN_POST_RESPONSE', env('ZHP_LOGIN_POST_RESPONSE'));
-    env('ZHP_LOGIN_DISABLE_PASSWORDS') === null || Config::define('ZHP_LOGIN_DISABLE_PASSWORDS', env('ZHP_LOGIN_DISABLE_PASSWORDS'));
+
     env('ZHP_LOGIN_SKIP_LOGIN_FORM') === null || Config::define('ZHP_LOGIN_SKIP_LOGIN_FORM', env('ZHP_LOGIN_SKIP_LOGIN_FORM'));
+    env('ZHP_LOGIN_DISABLE_PASSWORDS') === null || Config::define('ZHP_LOGIN_DISABLE_PASSWORDS', env('ZHP_LOGIN_DISABLE_PASSWORDS'));
+    env('ZHP_LOGIN_POST_RESPONSE') === null || Config::define('ZHP_LOGIN_POST_RESPONSE', env('ZHP_LOGIN_POST_RESPONSE'));
+    env('ZHP_LOGIN_MATCH_BY_EMAIL') === null || Config::define('ZHP_LOGIN_MATCH_BY_EMAIL', env('ZHP_LOGIN_MATCH_BY_EMAIL'));
     env('ZHP_LOGIN_CREATE_NEW_USER') === null || Config::define('ZHP_LOGIN_CREATE_NEW_USER', env('ZHP_LOGIN_CREATE_NEW_USER'));
     env('ZHP_LOGIN_NEW_USER_ROLE') === null || Config::define('ZHP_LOGIN_NEW_USER_ROLE', env('ZHP_LOGIN_NEW_USER_ROLE'));
+    env('ZHP_LOGIN_FULL_EMAIL_AS_USERNAME') === null || Config::define('ZHP_LOGIN_FULL_EMAIL_AS_USERNAME', env('ZHP_LOGIN_FULL_EMAIL_AS_USERNAME'));
+    env('ZHP_LOGIN_SYNC_USER_DATA') === null || Config::define('ZHP_LOGIN_SYNC_USER_DATA', env('ZHP_LOGIN_SYNC_USER_DATA'));
+    env('ZHP_LOGIN_USER_DATA_TO_SYNC') === null || Config::define('ZHP_LOGIN_USER_DATA_TO_SYNC', env('ZHP_LOGIN_USER_DATA_TO_SYNC'));
     Config::apply();
 }
 
 // Defines default values
-defined('ZHP_LOGIN_POST_RESPONSE') || define('ZHP_LOGIN_POST_RESPONSE', false);
-defined('ZHP_LOGIN_DISABLE_PASSWORDS') || define('ZHP_LOGIN_DISABLE_PASSWORDS', false);
 defined('ZHP_LOGIN_SKIP_LOGIN_FORM') || define('ZHP_LOGIN_SKIP_LOGIN_FORM', false);
+defined('ZHP_LOGIN_DISABLE_PASSWORDS') || define('ZHP_LOGIN_DISABLE_PASSWORDS', false);
+defined('ZHP_LOGIN_POST_RESPONSE') || define('ZHP_LOGIN_POST_RESPONSE', true);
+defined('ZHP_LOGIN_MATCH_BY_EMAIL') || define('ZHP_LOGIN_MATCH_BY_EMAIL', false);
 defined('ZHP_LOGIN_CREATE_NEW_USER') || define('ZHP_LOGIN_CREATE_NEW_USER', false);
 defined('ZHP_LOGIN_NEW_USER_ROLE') || define('ZHP_LOGIN_NEW_USER_ROLE', 'subscriber');
+defined('ZHP_LOGIN_FULL_EMAIL_AS_USERNAME') || define('ZHP_LOGIN_FULL_EMAIL_AS_USERNAME', false);
+defined('ZHP_LOGIN_SYNC_USER_DATA') || define('ZHP_LOGIN_SYNC_USER_DATA', true);
+define('ZHP_LOGIN_NEW_USER_DATA', [ 'user_login', 'user_nicename', 'user_url', 'user_email', 'display_name', 'nickname', 'first_name', 'last_name' ]);
+defined('ZHP_LOGIN_USER_DATA_TO_SYNC') || define('ZHP_LOGIN_USER_DATA_TO_SYNC', [ 'user_url', 'user_email', 'display_name', 'first_name', 'last_name' ]);
+if (is_string(ZHP_LOGIN_USER_DATA_TO_SYNC)) {
+    define('ZHP_LOGIN_PARSED_USER_DATA_TO_SYNC', array_map('trim', explode(',', ZHP_LOGIN_USER_DATA_TO_SYNC)));
+} else {
+    define('ZHP_LOGIN_PARSED_USER_DATA_TO_SYNC', array_map('trim', ZHP_LOGIN_USER_DATA_TO_SYNC));
+}
 
 // If plugin is used as a mu-plugin, COOKIEHASH is not defined
 defined('COOKIEHASH') || wp_cookie_constants();
@@ -65,29 +80,29 @@ class ZHPLogin
     {
         // If plugin is not configured, it will notify the administrators.
         if (!$this->is_configured()) {
-            add_action('all_admin_notices', array($this, 'not_configured_message'));
+            add_action('all_admin_notices', [ $this, 'not_configured_message' ]);
             return;
         }
         $this->callback_url  = wp_login_url();
         $this->callback_path = str_replace(home_url('', 'login_post'), '', $this->callback_url);
 
         // The authenticate Azure AD user
-        add_filter('authenticate', array($this, 'authenticate'), 1, 3);
+        add_filter('authenticate', [ $this, 'wp_authenticate_zhp' ], 1, 3);
 
         // Adds ZHP Login action
-        add_action('login_form_zhplogin', array($this, 'zhplogin_action'));
+        add_action('login_form_zhplogin', [ $this, 'zhplogin_action' ]);
 
         // Adds login button to the login form
-        add_action('login_form', array($this, 'add_login_button'));
+        add_action('login_form', [ $this, 'add_login_button' ]);
 
         // If set, the login form will be skipped and the user will be redirected to Azure AD login
-        add_action('login_init', array($this, 'skip_login_form'), 20);
+        add_action('login_init', [ $this, 'skip_login_form' ], 20);
 
         // Redirects after login to original location
-        add_filter('login_redirect', array($this, 'redirect_after_login'), 20, 3);
+        add_filter('login_redirect', [ $this, 'redirect_after_login' ], 20, 3);
 
         // In general, disables passwords
-        if (defined('ZHP_LOGIN_DISABLE_PASSWORDS') && ZHP_LOGIN_DISABLE_PASSWORDS === true) {
+        if (ZHP_LOGIN_DISABLE_PASSWORDS === true) {
             // Disables password reset
             add_filter('allow_password_reset', '__return_false');
             // Disables password change
@@ -127,9 +142,9 @@ class ZHPLogin
     // Returns the URL that redirects user to ZHP Login in Azure AD.
     public function zhplogin_url($redirect = '')
     {
-        $args = array(
+        $args = [
             'action' => 'zhplogin',
-        );
+         ];
 
         if (!empty($redirect)) {
             $args[ 'redirect_to' ] = urlencode($redirect);
@@ -147,7 +162,7 @@ class ZHPLogin
         return apply_filters('zhplogin_url', $zhplogin_url, $redirect);
     }
 
-    // zhp_login_action
+    // Redirects user to ZHP Login in Azure AD.
     public function zhplogin_action()
     {
         // Save the redirect_to parameter
@@ -227,23 +242,120 @@ class ZHPLogin
         return $redirect_to;
     }
 
-    // Listens for callback from Azure AD
-    public function authenticate($user, $username, $password)
+    // Generate unique username from email
+    public function generate_username($email, $user_login = '')
     {
+        $email    = str_replace('_', '-', $email);
+        $parts    = explode('@', $email);
+        $username = $parts[ 0 ];
+        $username = str_replace('.', '-', $username);
+        $domain   = $parts[ 1 ];
+
+        // If domain is part of ZHP domains, username will be generated from domain
+        if (ZHP_LOGIN_FULL_EMAIL_AS_USERNAME !== true) {
+            // firstname-lastname@zhp.net.pl -> firstname-lastname-net
+            if ($domain == 'zhp.net.pl') {
+                $username .= '-net';
+            } elseif (substr($domain, -7) == '.zhp.pl') {
+                // firstname-lastname@*.zhp.pl -> firstname-lastname-*
+                $username .= '-' . str_replace('.zhp.pl', '', $domain);
+            } else {
+                // firstname-lastname@zhp.pl -> firstname-lastname
+                $username = $username;
+            }
+        } else {
+            // name@domain.tld -> name-domain-tld
+            $username = $username . '-' . str_replace('.', '-', $domain);
+        }
+
+        $username = sanitize_user($username, true);
+
+        // Check if username exists, if current user's username, return false
+        $username_check = function ($username) use ($user_login) {
+            if (empty($user_login)) {
+                return username_exists($username);
+            }
+
+            $user = get_user_by('login', $username);
+            return !empty($user) && $user->user_login != $user_login;
+        };
+
+        // Generate unique username by addying suffix
+        $suffix = 2;
+        while ($username_check($alt_username ?? $username)) {
+            $base_length  = 49 - mb_strlen($suffix);
+            $alt_username = mb_substr($username, 0, $base_length) . "-$suffix";
+            ++$suffix;
+        }
+        $username = $alt_username ?? $username;
+
+        return $username;
+    }
+
+    // Get sync user data from Azure AD to WordPress
+    public function get_sync_user_data($zhp_user_data, $username, $new_user = false)
+    {
+        $user_data    = [  ];
+        $data_to_sync = ZHP_LOGIN_PARSED_USER_DATA_TO_SYNC;
+
+        if ($new_user === true) {
+            $data_to_sync = ZHP_LOGIN_NEW_USER_DATA;
+        }
+
+        // wp_update_user() does not update user_login, so we are doing that after calling wp_update_user(), here for new users
+        if (in_array('user_login', $data_to_sync)) {
+            $user_data[ 'user_login' ] = $username;
+        }
+
+        if (in_array('user_nicename', $data_to_sync)) {
+            $user_data[ 'user_nicename' ] = sanitize_title($username);
+        }
+
+        if (in_array('user_url', $data_to_sync)) {
+            $user_data[ 'user_url' ] = 'https://eur.delve.office.com/?' . http_build_query([
+                'u' => urlencode($zhp_user_data->id),
+                'v' => 'work',
+             ]);
+        }
+
+        if (in_array('user_email', $data_to_sync)) {
+            $user_data[ 'user_email' ] = $zhp_user_data->userPrincipalName;
+        }
+
+        if (in_array('display_name', $data_to_sync)) {
+            $user_data[ 'display_name' ] = !empty($zhp_user_data->displayName) ? $zhp_user_data->displayName : '';
+        }
+
+        if (in_array('nickname', $data_to_sync)) {
+            $user_data[ 'nickname' ] = $username;
+        }
+
+        if (in_array('first_name', $data_to_sync)) {
+            $user_data[ 'first_name' ] = !empty($zhp_user_data->givenName) ? $zhp_user_data->givenName : '';
+        }
+
+        if (in_array('last_name', $data_to_sync)) {
+            $user_data[ 'last_name' ] = !empty($zhp_user_data->surname) ? $zhp_user_data->surname : '';
+        }
+
+        return $user_data;
+    }
+
+    // Authenticate Azure AD user
+    public function wp_authenticate_zhp($user, $username, $password)
+    {
+        global $wpdb;
+
         // Do not authorize when the user is already logged in
-        if (is_a($user, 'WP_User')) {
+        if ($user instanceof WP_User) {
             return $user;
         }
 
         // Get the parameters from the request
-        if (ZHP_LOGIN_POST_RESPONSE === true && $_SERVER[ 'REQUEST_METHOD' ] === 'POST') {
-            parse_str(file_get_contents('php://input'), $params);
-        } else {
-            parse_str($_SERVER[ 'QUERY_STRING' ], $params);
-        }
+        $params = ZHP_LOGIN_POST_RESPONSE === true ? $_POST : $_GET;
 
         // The attempt to get an authorization code failed.
-        if (!empty($params[ 'error' ])) {
+        if (!empty($params[ 'error' ])) { // NOTE: Is this necessary?
             return new WP_Error(
                 $params[ 'error' ],
                 sprintf(
@@ -253,22 +365,24 @@ class ZHPLogin
             );
         }
 
+        // Listens for callback from Azure AD
         if (empty($params[ 'code' ])) {
-            return;
+            return $user;
         }
 
         // Check if the session is valid
         if (empty($_COOKIE[ $this->nonce_cookie ])) {
             return new WP_Error(
                 'missing_zhplogin_nonce',
-                __('Błąd: Użytkownik nie posiada odpowiedniego identyfikatora nonce. Odśwież stronę i spróbuj ponownie.', 'zhp-login')
+                __('Błąd: Użytkownik nie posiada odpowiedniego identyfikatora nonce. Zaloguj się ponownie.', 'zhp-login')
             );
         }
 
-        // Check if there is no forgery
+        // Delete the nonce cookie
         $nonce_value = $_COOKIE[ $this->nonce_cookie ];
-        setcookie($this->nonce_cookie, $nonce_value, time(), $this->callback_path, COOKIE_DOMAIN, is_ssl(), true);
+        setcookie($this->nonce_cookie, '', time(), $this->callback_path, COOKIE_DOMAIN, is_ssl(), true);
 
+        // Check if there is no forgery
         if (empty($params[ 'state' ]) || $params[ 'state' ] != $nonce_value) {
             return new WP_Error(
                 'zhplogin_nonce_mismatch',
@@ -276,6 +390,7 @@ class ZHPLogin
             );
         }
 
+        // Get the access token request
         $token_response = wp_remote_post('https://login.microsoftonline.com/' . urlencode(ZHP_LOGIN_TENANT_ID) . '/oauth2/v2.0/token', [
             'body' => [
                 'client_id'     => ZHP_LOGIN_CLIENT_ID,
@@ -292,6 +407,7 @@ class ZHPLogin
             return new WP_Error($token_response->get_error_code(), $token_response->get_error_message());
         }
 
+        // Parse access token
         $token_data = json_decode(wp_remote_retrieve_body($token_response));
 
         // Failed to obtain access token despite authorization code
@@ -310,6 +426,7 @@ class ZHPLogin
             return new WP_Error('unknown', __('Błąd: Nie uzyskano tokenu dostępu z niewiadomego powodu.', 'zhp-login'));
         }
 
+        // Get user data from Azure AD request
         $user_response = wp_remote_get('https://graph.microsoft.com/v1.0/me', [
             'headers' => [
                 'Authorization' => $token_data->token_type . " " . $token_data->access_token,
@@ -321,70 +438,154 @@ class ZHPLogin
             return new WP_Error($user_response->get_error_code(), $user_response->get_error_message());
         }
 
-        $user_data = json_decode(wp_remote_retrieve_body($user_response));
+        // Parse user data
+        $zhp_user_data = json_decode(wp_remote_retrieve_body($user_response));
 
         // Failed to obtain user informations
-        if (!empty($user_data->error)) {
+        if (!empty($zhp_user_data->error)) {
             return new WP_Error(
-                $user_data->error->code,
+                $zhp_user_data->error->code,
                 sprintf(
                     __('Błąd przy pobieraniu informacji o użytkowniku: %s', 'zhp-login'),
-                    $user_data->error->message
+                    $zhp_user_data->error->message
                 )
             );
         }
 
-        if (!empty($user_data->userPrincipalName) && is_string($user_data->userPrincipalName)) {
-            $email = $user_data->userPrincipalName;
-        } elseif (!empty($user_data->mail) && is_string($user_data->mail)) {
-            $email = $user_data->mail;
-        } else {
-            // Azure AD response contains neither the email address nor the userPrincipalName
+        // Check if Azure AD provided user id
+        if (empty($zhp_user_data->id)) {
             return new WP_Error(
-                'zhp_login_no_email',
-                __('Błąd: Nie znaleziono informacji o użytkowniku ZHP.', 'zhp-login')
+                'zhp_login_no_id',
+                __('Błąd: Nie znaleziono identyfikatora użytkownika ZHP.', 'zhp-login')
             );
         }
 
-        $user = get_user_by('email', $email);
+        // Check if Azure AD provided user email address
+        if (empty($zhp_user_data->userPrincipalName) || !is_email($zhp_user_data->userPrincipalName)) {
+            return new WP_Error(
+                'zhp_login_no_email',
+                __('Błąd: Nie otrzymanu adresu e-mail ZHP od usługi Azure AD.', 'zhp-login')
+            );
+        }
 
-        if (!is_a($user, 'WP_User')) {
-            if (ZHP_LOGIN_CREATE_NEW_USER !== true) {
-                // User does not exist
-                return new WP_Error(
-                    'zhp_login_no_user',
-                    sprintf(
-                        __('Błąd: Użytkownik o adresie e-mail %s nie instnieje.', 'zhp-login'),
-                        $email
-                    )
-                );
-            } else {
-                // Create new user if it does not exist
-                $new_user_data = array(
-                    'user_email'   => $email,
-                    'user_login'   => $email,
-                    'display_name' => !empty($user_data->displayName) ? $user_data->displayName : '',
-                    'first_name'   => !empty($user_data->givenName) ? $user_data->givenName : '',
-                    'last_name'    => !empty($user_data->surname) ? $user_data->surname : '',
-                    'user_pass'    => wp_generate_password(64, true, true),
-                    'role'         => ZHP_LOGIN_NEW_USER_ROLE,
-                );
+        // Define Azure AD user data
+        $email  = $zhp_user_data->userPrincipalName;
+        $zhp_id = $zhp_user_data->id;
 
-                $new_user_id = wp_insert_user($new_user_data);
+        // Get user by metadata zhp_id
+        $users = get_users([
+            'meta_key'   => 'zhp_id',
+            'meta_value' => $zhp_id,
+         ]);
 
-                // Failed to create new user
-                if (is_wp_error($new_user_id)) {
+        // NOTE: Scenario if metadata zhp_id points to no longer existing user, will be ignored in $users array
+        switch (count($users)) {
+
+            // User found, proceed to login
+            case 1:
+                $user = $users[ 0 ];
+                break;
+
+            // No user found
+            case 0:
+                if (ZHP_LOGIN_MATCH_BY_EMAIL !== true && ZHP_LOGIN_CREATE_NEW_USER !== true) {
                     return new WP_Error(
-                        'user_not_registered',
+                        'zhp_login_no_user',
+                        __('Błąd: Nie znaleziono użytkownika WordPress pasującego do identyfikatora ZHP.', 'zhp-login')
+                    );
+                }
+
+                // Find user by email
+                if (ZHP_LOGIN_MATCH_BY_EMAIL === true) {
+                    // Search for user by email
+                    $user = get_user_by('email', $email);
+
+                    // User found, proceed to login
+                    if (!empty($user)) {
+                        break;
+                    }
+                }
+
+                // User still not found even by email and creation of new users is disabled
+                if (ZHP_LOGIN_CREATE_NEW_USER !== true && empty($user)) {
+                    return new WP_Error(
+                        'zhp_login_no_user_by_email',
                         sprintf(
-                            __('Błąd: Nie udało stworzyć się nowego użytkownika o adresie e-mail %s.', 'zhp-login'),
+                            __('Błąd: Nie znaleziono użytkownika WordPress pasującego do adresu e-mail %s.', 'zhp-login'),
                             $email
                         )
                     );
                 }
 
-                $user = new WP_User($new_user_id);
+                // Check if user with this email exists
+                if (email_exists($email)) {
+                    return new WP_Error(
+                        'zhp_login_email_exists',
+                        sprintf(
+                            __('Błąd: Nie udało się zarejestrować, użytkownik o adresie e-mail %s już istnieje.', 'zhp-login'),
+                            $email
+                        )
+                    );
+                }
+
+                // Set user data for new user, proceed to create new user
+                $user_data = array_merge($this->get_sync_user_data($zhp_user_data, $this->generate_username($email), true), [
+                    'user_pass' => wp_generate_password(64, true),
+                    'role'      => ZHP_LOGIN_NEW_USER_ROLE,
+                 ]);
+
+                // Create new user
+                $user_id = wp_insert_user($user_data);
+
+                // Failed to create new user
+                if (is_wp_error($user_id)) {
+                    return new WP_Error(
+                        'user_not_registered',
+                        sprintf(
+                            __('Błąd: Nie udało stworzyć się nowego konta dla użytkownika o adresie e-mail %s.', 'zhp-login'),
+                            $email
+                        )
+                    );
+                }
+
+                // Proceed to login
+                $user = new WP_User($user_id);
+                break;
+
+            // More than one user found
+            default:
+                return new WP_Error(
+                    'zhp_login_multiple_users',
+                    __('Błąd: Znaleziono więcej niż jednego użytkownika WordPress o tym samym identyfikatorze ZHP.', 'zhp-login')
+                );
+                break;
+        }
+
+        // Add zhp_id metadata to user for future logins
+        if (get_user_meta($user->ID, 'zhp_id', true) !== $zhp_id) {
+            update_user_meta($user->ID, 'zhp_id', $zhp_id);
+        }
+
+        // Update user data
+        if (ZHP_LOGIN_SYNC_USER_DATA === true) {
+            $username = $this->generate_username($email, $user->user_login);
+
+            $sync_user_data = $this->get_sync_user_data($zhp_user_data, $username);
+            wp_update_user(array_merge($sync_user_data, [
+                'ID' => $user->ID,
+             ]));
+
+            // wp_update_user() does not update user_login, so we have to do it manually
+            if (in_array('user_login', ZHP_LOGIN_PARSED_USER_DATA_TO_SYNC)) {
+                if (!username_exists($username)) {
+                    $wpdb->update(
+                        $wpdb->users,
+                        [ 'user_login' => $username ],
+                        [ 'ID' => $user->ID ]
+                    );
+                }
             }
+
         }
 
         return $user;

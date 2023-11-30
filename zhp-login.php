@@ -12,7 +12,7 @@
  * Plugin Name:       ZHP Login
  * Plugin URI:        https://github.com/xartuu/wp-zhp-login
  * Description:       Enables the Azure AD Single Sign On used by ZHP.
- * Version:           0.1.4
+ * Version:           0.1.5
  * Author:            Artur Kociszewski
  * Author URI:        https://arturkociszewski.pl/
  * License:           GPL v3 or later
@@ -219,14 +219,25 @@ class ZHPLogin
     // If set, the login form will be skipped and the user will be redirected to Azure AD login
     public function skip_login_form()
     {
+        // Skip login form if enabled
         if (ZHP_LOGIN_SKIP_LOGIN_FORM !== true) {
             return;
         }
 
+        // User just logged out
         if (!empty($_REQUEST[ 'loggedout' ]) || !empty($_POST[ 'log' ])) {
             return;
         }
 
+        // Get the parameters from the request
+        $params = ZHP_LOGIN_POST_RESPONSE === true ? $_POST : $_GET;
+
+        // User is logging in with ZHP
+        if (!empty($params[ 'error' ]) || !empty($params[ 'code' ])) {
+            return;
+        }
+
+        // Redirect to ZHP Login
         return wp_redirect($this->zhplogin_url(@$_REQUEST[ 'redirect_to' ]));
     }
 
